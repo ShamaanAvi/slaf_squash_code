@@ -1,0 +1,7 @@
+Options -Indexes
+RewriteEngine On
+
+RewriteRule ^config/ - [F,L]
+RewriteRule ^docs/ - [F,L]
+RewriteRule ^database/ - [F,L]
+RewriteRule ^src/ - [F,L]
