@@ -1,5 +1,7 @@
 <?php 
+require_once "config/db.php";
 require_once "config/auth.php"; 
+require_once "config/functions.php";
 checkAccess(); // Ensure user is logged in
 include "public/home_header.php"; 
 
@@ -8,7 +10,7 @@ $dashboardData = ($role === 'player' && !empty($_SESSION['player_id'])) ? getPla
 ?>
 
 <div class="text-center mb-5">
-    <h2 class="fw-bold">Sri Lanka Air Force Squash</h2>
+    <h2 class="fw-bold">Sri Lanka Squash Scoring System</h2>
     <p class="text-muted">Welcome, <?php echo htmlspecialchars($_SESSION['username']); ?> (<?php echo ucfirst($role); ?>)</p>
 </div>
 
@@ -84,6 +86,17 @@ $dashboardData = ($role === 'player' && !empty($_SESSION['player_id'])) ? getPla
             </div>
         </a>
     </div>
+    <div class="col-md-4">
+        <a href="admin/reports.php" class="text-decoration-none">
+            <div class="card shadow-sm h-100 dashboard-card border-0">
+                <div class="card-body text-center">
+                    <i class="bi bi-file-earmark-text fs-1 text-primary mb-3 d-block"></i>
+                    <h5>Reports</h5>
+                    <p class="text-muted small">Generate printable tournament reports</p>
+                </div>
+            </div>
+        </a>
+    </div>
     <?php endif; ?>
 
     <div class="col-md-4">
@@ -98,17 +111,19 @@ $dashboardData = ($role === 'player' && !empty($_SESSION['player_id'])) ? getPla
         </a>
     </div>
 
-    <div class="col-md-4">
-        <a href="scores/view.php" class="text-decoration-none">
-            <div class="card shadow-sm h-100 dashboard-card border-0">
-                <div class="card-body text-center">
-                    <i class="bi bi-star-fill fs-1 text-primary mb-3 d-block"></i>
-                    <h5>Rankings</h5>
-                    <p class="text-muted small">Live category rankings</p>
+    <?php if ($role === 'player'): ?>
+        <div class="col-md-4">
+            <a href="scores/view.php" class="text-decoration-none">
+                <div class="card shadow-sm h-100 dashboard-card border-0">
+                    <div class="card-body text-center">
+                        <i class="bi bi-star-fill fs-1 text-primary mb-3 d-block"></i>
+                        <h5>Rankings</h5>
+                        <p class="text-muted small">Live category rankings</p>
+                    </div>
                 </div>
-            </div>
-        </a>
-    </div>
+            </a>
+        </div>
+    <?php endif; ?>
 
 </div>
 

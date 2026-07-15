@@ -49,6 +49,124 @@ function checkSessionTimeout($timeout_duration = 1800)
     }
 }
 
+function ensureUserSessionsTable($conn)
+{
+    $conn->query(
+        'CREATE TABLE IF NOT EXISTS user_sessions (
+            session_id VARCHAR(128) PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            last_activity INT UNSIGNED NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_user_sessions_user_activity (user_id, last_activity),
+            CONSTRAINT fk_user_sessions_user
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+}
+
+function destroyCurrentSession()
+{
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+    }
+    session_destroy();
+}
+
+function redirectExpiredSession($reason = 'timeout')
+{
+    destroyCurrentSession();
+    header('Location: ' . redirectPath('index.php?' . $reason . '=1'));
+    exit;
+}
+
+function registerUserSession($conn, $userId, $sessionId, $maxSessions = 3, $timeoutDuration = 600)
+{
+    ensureUserSessionsTable($conn);
+    $now = time();
+    $cutoff = $now - $timeoutDuration;
+
+    $stmt = $conn->prepare('DELETE FROM user_sessions WHERE last_activity < ?');
+    $stmt->bind_param('i', $cutoff);
+    $stmt->execute();
+
+    $stmt = $conn->prepare(
+        'INSERT INTO user_sessions (session_id, user_id, last_activity)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), last_activity = VALUES(last_activity)'
+    );
+    $stmt->bind_param('sii', $sessionId, $userId, $now);
+    $stmt->execute();
+
+    $stmt = $conn->prepare('SELECT session_id FROM user_sessions WHERE user_id = ? ORDER BY last_activity DESC, created_at DESC');
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    $sessions = fetchAll($stmt->get_result());
+    $expiredSessionIds = array_slice(array_column($sessions, 'session_id'), $maxSessions);
+
+    if ($expiredSessionIds) {
+        $placeholders = implode(',', array_fill(0, count($expiredSessionIds), '?'));
+        $types = str_repeat('s', count($expiredSessionIds));
+        $stmt = $conn->prepare("DELETE FROM user_sessions WHERE session_id IN ($placeholders)");
+        $stmt->bind_param($types, ...$expiredSessionIds);
+        $stmt->execute();
+    }
+}
+
+function enforceAuthenticatedSession($conn, $timeoutDuration = 600, $maxSessions = 3)
+{
+    if (session_status() !== PHP_SESSION_ACTIVE || empty($_SESSION['user_id'])) {
+        return;
+    }
+
+    $now = time();
+    $sessionId = session_id();
+    $userId = (int)$_SESSION['user_id'];
+
+    if (isset($_SESSION['LAST_ACTIVITY']) && $now - (int)$_SESSION['LAST_ACTIVITY'] > $timeoutDuration) {
+        ensureUserSessionsTable($conn);
+        $stmt = $conn->prepare('DELETE FROM user_sessions WHERE session_id = ?');
+        $stmt->bind_param('s', $sessionId);
+        $stmt->execute();
+        redirectExpiredSession('timeout');
+    }
+
+    ensureUserSessionsTable($conn);
+    $cutoff = $now - $timeoutDuration;
+    $stmt = $conn->prepare('DELETE FROM user_sessions WHERE last_activity < ?');
+    $stmt->bind_param('i', $cutoff);
+    $stmt->execute();
+
+    $stmt = $conn->prepare('SELECT user_id, last_activity FROM user_sessions WHERE session_id = ? LIMIT 1');
+    $stmt->bind_param('s', $sessionId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+
+    if (!$row && empty($_SESSION['MANAGED_SESSION'])) {
+        $_SESSION['MANAGED_SESSION'] = 1;
+        $_SESSION['LAST_ACTIVITY'] = $now;
+        registerUserSession($conn, $userId, $sessionId, $maxSessions, $timeoutDuration);
+        return;
+    }
+
+    if (!$row || (int)$row['user_id'] !== $userId) {
+        redirectExpiredSession('session_limit');
+    }
+    if ($now - (int)$row['last_activity'] > $timeoutDuration) {
+        $stmt = $conn->prepare('DELETE FROM user_sessions WHERE session_id = ?');
+        $stmt->bind_param('s', $sessionId);
+        $stmt->execute();
+        redirectExpiredSession('timeout');
+    }
+
+    $_SESSION['LAST_ACTIVITY'] = $now;
+    $stmt = $conn->prepare('UPDATE user_sessions SET last_activity = ? WHERE session_id = ?');
+    $stmt->bind_param('is', $now, $sessionId);
+    $stmt->execute();
+    registerUserSession($conn, $userId, $sessionId, $maxSessions, $timeoutDuration);
+}
+
 function generateCsrfToken()
 {
     safeSessionStart();
@@ -101,8 +219,99 @@ function fetchAll($result)
 
 function getAgeCategories($conn)
 {
-    $result = $conn->query('SELECT id, name, gender FROM age_categories ORDER BY id ASC');
+    $categoryOrder = [
+        'Boys U9', 'Girls U9',
+        'Boys U11', 'Girls U11',
+        'Boys U 11 Novice', 'Girls U 11 Novice',
+        'Boys U13', 'Girls U13',
+        'Boys U15', 'Girls U15',
+        'Boys U 15 Novice', 'Girls U 15 Novice',
+        'Boys U17', 'Girls U17',
+        'Boys U19', 'Girls U19',
+        "Men's Open", "Women's Open",
+        "Women's Over 35",
+        "Men's Over 35", "Men's Over 40", "Men's Over 45",
+        "Men's Masters Over 50", "Men's Masters Over 55", "Men's Masters Over 60", "Men's Masters Over 65",
+    ];
+    $quotedOrder = array_map(function ($category) use ($conn) {
+        return "'" . $conn->real_escape_string($category) . "'";
+    }, $categoryOrder);
+    $result = $conn->query(
+        'SELECT id, name, gender FROM age_categories ORDER BY FIELD(name, ' . implode(',', $quotedOrder) . ') = 0, FIELD(name, ' . implode(',', $quotedOrder) . '), id ASC'
+    );
     return fetchAll($result);
+}
+
+function getCategoryOrderMap()
+{
+    return [
+        'Male' => [
+            'Boys U9', 'Boys U11', 'Boys U 11 Novice', 'Boys U13', 'Boys U15', 'Boys U 15 Novice', 'Boys U17', 'Boys U19',
+            "Men's Open", "Men's Over 35", "Men's Over 40", "Men's Over 45",
+            "Men's Masters Over 50", "Men's Masters Over 55", "Men's Masters Over 60", "Men's Masters Over 65",
+        ],
+        'Female' => [
+            'Girls U9', 'Girls U11', 'Girls U 11 Novice', 'Girls U13', 'Girls U15', 'Girls U 15 Novice', 'Girls U17', 'Girls U19',
+            "Women's Open", "Women's Over 35",
+        ],
+    ];
+}
+
+function getCategoryRank($categoryName, $gender)
+{
+    $map = getCategoryOrderMap();
+    $list = $map[$gender] ?? [];
+    $rank = array_search($categoryName, $list, true);
+    return $rank === false ? null : $rank;
+}
+
+function isPlayerEligibleForTournamentCategory($playerCategoryName, $playerGender, $tournamentCategoryName, $tournamentGender)
+{
+    if ($playerGender !== $tournamentGender) {
+        return false;
+    }
+    $playerRank = getCategoryRank($playerCategoryName, $playerGender);
+    $tournamentRank = getCategoryRank($tournamentCategoryName, $tournamentGender);
+    if ($playerRank === null || $tournamentRank === null) {
+        return false;
+    }
+    return $tournamentRank >= $playerRank;
+}
+
+function tableColumnExists($conn, $table, $column)
+{
+    $stmt = $conn->prepare(
+        'SELECT COUNT(*) AS count
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+    );
+    $stmt->bind_param('ss', $table, $column);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    return (int)($row['count'] ?? 0) > 0;
+}
+
+function generatePlayerUsername($conn, $name)
+{
+    $base = strtolower(preg_replace('/[^a-z0-9]+/i', '.', trim($name)));
+    $base = trim($base, '.');
+    if ($base === '') {
+        $base = 'player';
+    }
+
+    for ($i = 0; $i < 20; $i++) {
+        $suffix = $i === 0 ? random_int(1000, 9999) : random_int(10000, 99999);
+        $username = substr($base, 0, 50) . '.' . $suffix;
+
+        $stmt = $conn->prepare('SELECT id FROM users WHERE username = ? LIMIT 1');
+        $stmt->bind_param('s', $username);
+        $stmt->execute();
+        if (!$stmt->get_result()->fetch_assoc()) {
+            return $username;
+        }
+    }
+
+    throw new Exception('Could not generate a unique player username.');
 }
 
 function getRankingYearAge($dob, $year = null)
@@ -254,8 +463,108 @@ function refreshAllPlayerCalculatedCategories($conn, $year = null)
 
 function getPlayers($conn)
 {
-    $result = $conn->query('SELECT id, full_name FROM players ORDER BY full_name ASC');
-    return fetchAll($result);
+    $hasIdentityType = tableColumnExists($conn, 'players', 'identity_type');
+    $hasPassportExpiry = tableColumnExists($conn, 'players', 'passport_expiry_date');
+    $identitySelect = $hasIdentityType ? 'identity_type' : "'NIC' AS identity_type";
+    $expirySelect = $hasPassportExpiry ? 'passport_expiry_date' : 'NULL AS passport_expiry_date';
+    $result = $conn->query("SELECT id, full_name, {$identitySelect}, nic, {$expirySelect} FROM players ORDER BY full_name ASC");
+    $players = fetchAll($result);
+
+    foreach ($players as &$player) {
+        $player['passport_status'] = getPassportExpiryStatus($player['identity_type'] ?? 'NIC', $player['passport_expiry_date'] ?? null);
+        $player['passport_status_label'] = getPassportExpiryLabel($player['passport_status'], $player['passport_expiry_date'] ?? null);
+    }
+    unset($player);
+
+    return $players;
+}
+
+function getPlayerList($conn, $search = '')
+{
+    $sql = 'SELECT p.*, u.username, ac.name AS calculated_category_name
+            FROM players p
+            JOIN users u ON u.id = p.user_id
+            LEFT JOIN age_categories ac ON ac.id = p.calculated_category_id
+            WHERE 1=1';
+    $params = [];
+    $types = '';
+    $search = trim($search);
+    if ($search !== '') {
+        $sql .= ' AND (p.full_name LIKE ? OR p.nic LIKE ? OR p.phone LIKE ? OR p.email LIKE ? OR u.username LIKE ?)';
+        $term = '%' . $search . '%';
+        $params = [$term, $term, $term, $term, $term];
+        $types = 'sssss';
+    }
+    $sql .= ' ORDER BY p.full_name ASC';
+    $stmt = $conn->prepare($sql);
+    if ($types !== '') {
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+    $players = fetchAll($stmt->get_result());
+    foreach ($players as &$player) {
+        $player['passport_status'] = getPassportExpiryStatus($player['identity_type'] ?? 'NIC', $player['passport_expiry_date'] ?? null);
+        $player['passport_status_label'] = getPassportExpiryLabel($player['passport_status'], $player['passport_expiry_date'] ?? null);
+    }
+    unset($player);
+    return $players;
+}
+
+function getPlayerAdminById($conn, $playerId)
+{
+    $stmt = $conn->prepare(
+        'SELECT p.*, u.username, u.is_active, ac.name AS calculated_category_name
+         FROM players p
+         JOIN users u ON u.id = p.user_id
+         LEFT JOIN age_categories ac ON ac.id = p.calculated_category_id
+         WHERE p.id = ?'
+    );
+    $stmt->bind_param('i', $playerId);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc();
+}
+
+function getPassportExpiryStatus($identityType, $expiryDate, $warningDays = 90)
+{
+    if ($identityType !== 'Passport') {
+        return 'not_passport';
+    }
+    if (!$expiryDate) {
+        return 'unknown';
+    }
+
+    $expiry = DateTime::createFromFormat('Y-m-d', (string)$expiryDate);
+    $errors = DateTime::getLastErrors();
+    if (!$expiry || ($errors && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+        return 'unknown';
+    }
+
+    $today = new DateTime('today');
+    if ($expiry < $today) {
+        return 'expired';
+    }
+
+    $warningLimit = (clone $today)->modify('+' . (int)$warningDays . ' days');
+    return $expiry <= $warningLimit ? 'expiring' : 'valid';
+}
+
+function getPassportExpiryLabel($status, $expiryDate)
+{
+    if ($status === 'not_passport') {
+        return 'NIC document';
+    }
+    if ($status === 'unknown') {
+        return 'Passport expiry date not recorded';
+    }
+
+    $date = $expiryDate ? date('d M Y', strtotime($expiryDate)) : '';
+    if ($status === 'expired') {
+        return 'Passport expired on ' . $date;
+    }
+    if ($status === 'expiring') {
+        return 'Passport expires soon on ' . $date;
+    }
+    return 'Passport valid until ' . $date;
 }
 
 function getSystemSetting($conn, $key, $default = null)
@@ -280,16 +589,31 @@ function setSystemSetting($conn, $key, $value)
 function registerPlayer($conn, $data)
 {
     $name = trim($data['name'] ?? '');
+    $identityType = trim($data['identity_type'] ?? '');
     $nic = trim($data['nic'] ?? '');
+    $passportExpiryDate = trim($data['passport_expiry_date'] ?? '');
     $dob = $data['dob'] ?? null;
     $gender = ucfirst(strtolower(trim($data['gender'] ?? '')));
     $address = trim($data['address'] ?? '');
     $phone = trim($data['phone'] ?? '');
     $email = trim($data['email'] ?? '');
-    $otherCategoryId = (int)($data['other_category_id'] ?? 0);
 
-    if ($name === '' || $nic === '' || $dob === '') {
-        throw new Exception('Full name, NIC/Passport, and date of birth are required.');
+    if (!in_array($identityType, ['NIC', 'Passport'], true)) {
+        throw new Exception('Please select NIC or Passport.');
+    }
+    if ($identityType !== 'Passport') {
+        $passportExpiryDate = null;
+    } elseif ($passportExpiryDate !== '') {
+        $expiry = DateTime::createFromFormat('Y-m-d', $passportExpiryDate);
+        $errors = DateTime::getLastErrors();
+        if (!$expiry || ($errors && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+            throw new Exception('Please enter a valid passport expiry date.');
+        }
+    } else {
+        $passportExpiryDate = null;
+    }
+    if ($name === '' || $dob === '') {
+        throw new Exception('Full name and date of birth are required.');
     }
     if (!in_array($gender, ['Male', 'Female'], true)) {
         throw new Exception('Please select the player gender.');
@@ -301,31 +625,46 @@ function registerPlayer($conn, $data)
     $primaryCategoryName = getAgeCategoryNameForPlayer($dob, $gender);
     $primaryCategoryId = getAgeCategoryIdByName($conn, $primaryCategoryName);
     $categoryIds = [$primaryCategoryId];
-    if ($otherCategoryId > 0 && $otherCategoryId !== $primaryCategoryId) {
-        $stmt = $conn->prepare('SELECT id FROM age_categories WHERE id = ? LIMIT 1');
-        $stmt->bind_param('i', $otherCategoryId);
-        $stmt->execute();
-        if (!$stmt->get_result()->fetch_assoc()) {
-            throw new Exception('Selected optional category is not valid.');
-        }
-        $categoryIds[] = $otherCategoryId;
-    }
 
-    $passwordHash = password_hash($nic, PASSWORD_BCRYPT);
+    $username = $nic !== '' ? $nic : generatePlayerUsername($conn, $name);
+    $identityNumber = $nic !== '' ? $nic : null;
+    $passwordHash = password_hash($username, PASSWORD_BCRYPT);
     $role = 'player';
 
     $conn->begin_transaction();
     try {
         $stmt = $conn->prepare('INSERT INTO users (username, password, role, is_first_login) VALUES (?, ?, ?, 1)');
-        $stmt->bind_param('sss', $nic, $passwordHash, $role);
+        $stmt->bind_param('sss', $username, $passwordHash, $role);
         $stmt->execute();
         $userId = $conn->insert_id;
 
-        $stmt = $conn->prepare(
-            'INSERT INTO players (user_id, full_name, nic, dob, date_of_birth, gender, calculated_category_id, address, phone, email)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        $stmt->bind_param('isssssisss', $userId, $name, $nic, $dob, $dob, $gender, $primaryCategoryId, $address, $phone, $email);
+        $hasIdentityType = tableColumnExists($conn, 'players', 'identity_type');
+        $hasPassportExpiry = tableColumnExists($conn, 'players', 'passport_expiry_date');
+        if ($hasIdentityType && $hasPassportExpiry) {
+            $stmt = $conn->prepare(
+                'INSERT INTO players (user_id, full_name, identity_type, nic, passport_expiry_date, dob, date_of_birth, gender, calculated_category_id, address, phone, email)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->bind_param('isssssssisss', $userId, $name, $identityType, $identityNumber, $passportExpiryDate, $dob, $dob, $gender, $primaryCategoryId, $address, $phone, $email);
+        } elseif ($hasIdentityType) {
+            $stmt = $conn->prepare(
+                'INSERT INTO players (user_id, full_name, identity_type, nic, dob, date_of_birth, gender, calculated_category_id, address, phone, email)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->bind_param('issssssisss', $userId, $name, $identityType, $identityNumber, $dob, $dob, $gender, $primaryCategoryId, $address, $phone, $email);
+        } elseif ($hasPassportExpiry) {
+            $stmt = $conn->prepare(
+                'INSERT INTO players (user_id, full_name, nic, passport_expiry_date, dob, date_of_birth, gender, calculated_category_id, address, phone, email)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->bind_param('issssssisss', $userId, $name, $identityNumber, $passportExpiryDate, $dob, $dob, $gender, $primaryCategoryId, $address, $phone, $email);
+        } else {
+            $stmt = $conn->prepare(
+                'INSERT INTO players (user_id, full_name, nic, dob, date_of_birth, gender, calculated_category_id, address, phone, email)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->bind_param('isssssisss', $userId, $name, $identityNumber, $dob, $dob, $gender, $primaryCategoryId, $address, $phone, $email);
+        }
         $stmt->execute();
         $playerId = $conn->insert_id;
 
@@ -343,13 +682,13 @@ function registerPlayer($conn, $data)
 
         logAudit($conn, 'player_created', 'players', $playerId, $name);
         $conn->commit();
-        return $nic;
+        return $username;
     } catch (Exception $e) {
         $conn->rollback();
-        if ($conn->errno == 1062) {
+        if ((int)$e->getCode() === 1062) {
             throw new Exception('A player with this NIC/Passport already exists.');
         }
-        error_log('Register player failed: ' . $e->getMessage());
+        error_log('Register player failed [' . $e->getCode() . ']: ' . $e->getMessage());
         throw new Exception('Could not register player.');
     }
 }
@@ -364,6 +703,112 @@ function getPlayerProfile($conn, $playerId)
     $stmt->bind_param('i', $playerId);
     $stmt->execute();
     return $stmt->get_result()->fetch_assoc();
+}
+
+function getUserAccount($conn, $userId)
+{
+    $stmt = $conn->prepare('SELECT id, username, role FROM users WHERE id = ?');
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc();
+}
+
+function updateUserPassword($conn, $userId, $data)
+{
+    $password = $data['password'] ?? '';
+    $confirm = $data['confirm_password'] ?? '';
+
+    if ($password === '') {
+        throw new Exception('Please enter a new password.');
+    }
+    if ($password !== $confirm) {
+        throw new Exception('Passwords do not match.');
+    }
+
+    $hash = password_hash($password, PASSWORD_BCRYPT);
+    $stmt = $conn->prepare('UPDATE users SET password = ? WHERE id = ?');
+    $stmt->bind_param('si', $hash, $userId);
+    $stmt->execute();
+    logAudit($conn, 'profile_updated', 'users', $userId, 'Password updated');
+    return true;
+}
+
+function updateAdminPlayer($conn, $playerId, $data)
+{
+    $name = trim($data['name'] ?? '');
+    $identityType = trim($data['identity_type'] ?? '');
+    $identityNumber = trim($data['nic'] ?? '');
+    $passportExpiryDate = trim($data['passport_expiry_date'] ?? '');
+    $dob = trim($data['dob'] ?? '');
+    $gender = normalizePlayerGender($data['gender'] ?? '');
+    $address = trim($data['address'] ?? '');
+    $phone = trim($data['phone'] ?? '');
+    $email = trim($data['email'] ?? '');
+    $psa = trim($data['psa_wsf_ranking'] ?? '');
+
+    if ($name === '' || $dob === '' || $gender === '') {
+        throw new Exception('Full name, date of birth, and gender are required.');
+    }
+    if (!in_array($identityType, ['NIC', 'Passport'], true)) {
+        throw new Exception('Please select NIC or Passport.');
+    }
+    if ($identityType !== 'Passport') {
+        $passportExpiryDate = null;
+    } elseif ($passportExpiryDate === '') {
+        $passportExpiryDate = null;
+    }
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new Exception('Please enter a valid email address.');
+    }
+    $psaValue = $psa === '' ? null : (int)$psa;
+
+    $categoryName = getAgeCategoryNameForPlayer($dob, $gender);
+    $categoryId = getAgeCategoryIdByName($conn, $categoryName);
+
+    $conn->begin_transaction();
+    try {
+        $stmt = $conn->prepare(
+            'UPDATE players
+             SET full_name = ?, identity_type = ?, nic = ?, passport_expiry_date = ?, dob = ?, date_of_birth = ?,
+                 gender = ?, calculated_category_id = ?, address = ?, phone = ?, email = ?, psa_wsf_ranking = ?
+             WHERE id = ?'
+        );
+        $stmt->bind_param(
+            'sssssssisssii',
+            $name,
+            $identityType,
+            $identityNumber,
+            $passportExpiryDate,
+            $dob,
+            $dob,
+            $gender,
+            $categoryId,
+            $address,
+            $phone,
+            $email,
+            $psaValue,
+            $playerId
+        );
+        $stmt->execute();
+
+        $delete = $conn->prepare('DELETE FROM player_categories WHERE player_id = ?');
+        $delete->bind_param('i', $playerId);
+        $delete->execute();
+        $insert = $conn->prepare('INSERT INTO player_categories (player_id, category_id) VALUES (?, ?)');
+        $insert->bind_param('ii', $playerId, $categoryId);
+        $insert->execute();
+
+        logAudit($conn, 'player_updated', 'players', $playerId, $name);
+        $conn->commit();
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        if ((int)$e->getCode() === 1062) {
+            throw new Exception('Another player already uses this document number.');
+        }
+        error_log('Admin player update failed: ' . $e->getMessage());
+        throw new Exception('Could not update player.');
+    }
 }
 
 function updatePlayerProfile($conn, $playerId, $data, $userId = null, $completeFirstLogin = false)
@@ -435,22 +880,64 @@ function addTournament($conn, $data)
 {
     $name = trim($data['name'] ?? '');
     $tier = strtoupper($data['tier'] ?? 'B');
-    $drawSize = (int)($data['draw_size'] ?? 0);
     $heldOn = $data['held_on'] ?? '';
-    $categoryId = (int)($data['category_id'] ?? 0);
+    $endOn = trim($data['end_on'] ?? '');
+    $categoryIds = $data['category_ids'] ?? ($data['category_id'] ?? []);
+    if (!is_array($categoryIds)) {
+        $categoryIds = [$categoryIds];
+    }
+    $categoryIds = array_values(array_unique(array_filter(array_map('intval', $categoryIds))));
 
-    if ($name === '' || !in_array($tier, ['A', 'B'], true) || $drawSize < 0 || $heldOn === '' || $categoryId <= 0) {
+    if ($name === '' || !in_array($tier, ['A', 'B'], true) || $heldOn === '' || $endOn === '' || !$categoryIds) {
         throw new Exception('Please complete all tournament fields.');
     }
+    if ($endOn !== '' && $endOn < $heldOn) {
+        throw new Exception('Ending date cannot be before the starting date.');
+    }
 
-    $stmt = $conn->prepare(
-        'INSERT INTO tournaments (name, tournament_name, tier, draw_size, held_on, category_id)
-         VALUES (?, ?, ?, ?, ?, ?)'
-    );
-    $stmt->bind_param('sssisi', $name, $name, $tier, $drawSize, $heldOn, $categoryId);
-    $ok = $stmt->execute();
-    logAudit($conn, 'tournament_created', 'tournaments', $conn->insert_id, $name);
-    return $ok;
+    $placeholders = implode(',', array_fill(0, count($categoryIds), '?'));
+    $types = str_repeat('i', count($categoryIds));
+    $stmt = $conn->prepare("SELECT id FROM age_categories WHERE id IN ($placeholders)");
+    $stmt->bind_param($types, ...$categoryIds);
+    $stmt->execute();
+    if ($stmt->get_result()->num_rows !== count($categoryIds)) {
+        throw new Exception('One or more selected age categories are invalid.');
+    }
+
+    $hasEndOn = tableColumnExists($conn, 'tournaments', 'end_on');
+    $conn->begin_transaction();
+    try {
+        if ($hasEndOn) {
+            $stmt = $conn->prepare(
+                'INSERT INTO tournaments (name, tournament_name, tier, held_on, end_on, category_id)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+        } else {
+            $stmt = $conn->prepare(
+                'INSERT INTO tournaments (name, tournament_name, tier, held_on, category_id)
+                 VALUES (?, ?, ?, ?, ?)'
+            );
+        }
+
+        $createdIds = [];
+        foreach ($categoryIds as $categoryId) {
+            if ($hasEndOn) {
+                $stmt->bind_param('sssssi', $name, $name, $tier, $heldOn, $endOn, $categoryId);
+            } else {
+                $stmt->bind_param('ssssi', $name, $name, $tier, $heldOn, $categoryId);
+            }
+            $stmt->execute();
+            $createdIds[] = $conn->insert_id;
+        }
+
+        logAudit($conn, 'tournament_created', 'tournaments', $createdIds[0] ?? null, $name . ' (' . count($createdIds) . ' categories)');
+        $conn->commit();
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        error_log('Tournament creation failed: ' . $e->getMessage());
+        throw new Exception('Could not create tournament.');
+    }
 }
 
 function getAssignedTournamentsWithoutResult($conn, $playerId)
@@ -469,20 +956,47 @@ function getAssignedTournamentsWithoutResult($conn, $playerId)
     return fetchAll($stmt->get_result());
 }
 
+function getAssignedPlayersWithoutResult($conn, $tournamentId)
+{
+    $stmt = $conn->prepare(
+        'SELECT p.id, p.full_name, ac.name AS calculated_category_name
+         FROM player_tournaments pt
+         JOIN players p ON p.id = pt.player_id
+         LEFT JOIN age_categories ac ON ac.id = p.calculated_category_id
+         LEFT JOIN tournament_results tr ON (tr.tournament_id = pt.tournament_id AND tr.player_id = pt.player_id)
+         WHERE pt.tournament_id = ? AND tr.id IS NULL
+         ORDER BY p.full_name ASC'
+    );
+    $stmt->bind_param('i', $tournamentId);
+    $stmt->execute();
+    return fetchAll($stmt->get_result());
+}
+
 function updateTournament($conn, $id, $data)
 {
     $name = trim($data['name'] ?? '');
     $tier = strtoupper($data['tier'] ?? 'B');
     $drawSize = (int)($data['draw_size'] ?? 0);
     $heldOn = $data['held_on'] ?? '';
+    $endOn = trim($data['end_on'] ?? '');
     $categoryId = (int)($data['category_id'] ?? 0);
-    if ($name === '' || !in_array($tier, ['A', 'B'], true) || $drawSize < 0 || $heldOn === '' || $categoryId <= 0) {
+    if ($name === '' || !in_array($tier, ['A', 'B'], true) || $drawSize < 0 || $heldOn === '' || $endOn === '' || $categoryId <= 0) {
         throw new Exception('Please complete all tournament fields.');
     }
-    $stmt = $conn->prepare(
-        'UPDATE tournaments SET name = ?, tournament_name = ?, tier = ?, draw_size = ?, held_on = ?, category_id = ? WHERE id = ?'
-    );
-    $stmt->bind_param('sssisii', $name, $name, $tier, $drawSize, $heldOn, $categoryId, $id);
+    if ($endOn !== '' && $endOn < $heldOn) {
+        throw new Exception('Ending date cannot be before the starting date.');
+    }
+    if (tableColumnExists($conn, 'tournaments', 'end_on')) {
+        $stmt = $conn->prepare(
+            'UPDATE tournaments SET name = ?, tournament_name = ?, tier = ?, draw_size = ?, held_on = ?, end_on = ?, category_id = ? WHERE id = ?'
+        );
+        $stmt->bind_param('sssissii', $name, $name, $tier, $drawSize, $heldOn, $endOn, $categoryId, $id);
+    } else {
+        $stmt = $conn->prepare(
+            'UPDATE tournaments SET name = ?, tournament_name = ?, tier = ?, draw_size = ?, held_on = ?, category_id = ? WHERE id = ?'
+        );
+        $stmt->bind_param('sssisii', $name, $name, $tier, $drawSize, $heldOn, $categoryId, $id);
+    }
     $ok = $stmt->execute();
     logAudit($conn, 'tournament_updated', 'tournaments', $id, $name);
     return $ok;
@@ -517,9 +1031,97 @@ function getTournamentList($conn, $includeArchived = false)
     return fetchAll($conn->query($sql));
 }
 
+function getTournamentDetails($conn, $id)
+{
+    $stmt = $conn->prepare(
+        'SELECT t.*, COALESCE(t.name, t.tournament_name) AS display_name, ac.name AS category_name, ac.gender AS category_gender
+         FROM tournaments t
+         LEFT JOIN age_categories ac ON ac.id = t.category_id
+         WHERE t.id = ?'
+    );
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc();
+}
+
+function getTournamentAssignedPlayers($conn, $tournamentId)
+{
+    $stmt = $conn->prepare(
+        'SELECT pt.assigned_at, p.id AS player_id, p.full_name, p.identity_type, p.nic, p.passport_expiry_date,
+                COALESCE(p.date_of_birth, p.dob) AS dob, p.gender, p.phone, p.email,
+                ac.name AS calculated_category_name,
+                tr.finish_position, tr.points_awarded, tr.is_penalty
+         FROM player_tournaments pt
+         JOIN players p ON p.id = pt.player_id
+         LEFT JOIN age_categories ac ON ac.id = p.calculated_category_id
+         LEFT JOIN tournament_results tr ON tr.tournament_id = pt.tournament_id AND tr.player_id = pt.player_id
+         WHERE pt.tournament_id = ?
+         ORDER BY p.full_name ASC'
+    );
+    $stmt->bind_param('i', $tournamentId);
+    $stmt->execute();
+    $rows = fetchAll($stmt->get_result());
+    foreach ($rows as &$row) {
+        $row['passport_status'] = getPassportExpiryStatus($row['identity_type'] ?? 'NIC', $row['passport_expiry_date'] ?? null);
+        $row['passport_status_label'] = getPassportExpiryLabel($row['passport_status'], $row['passport_expiry_date'] ?? null);
+    }
+    unset($row);
+    return $rows;
+}
+
+function getEligiblePlayersForTournament($conn, $tournamentId)
+{
+    $tournament = getTournamentDetails($conn, $tournamentId);
+    if (!$tournament) {
+        return [];
+    }
+
+    $players = getPlayerList($conn);
+    $eligible = [];
+    foreach ($players as $player) {
+        if (empty($player['calculated_category_name']) || empty($player['gender'])) {
+            continue;
+        }
+        if (
+            isPlayerEligibleForTournamentCategory(
+                $player['calculated_category_name'],
+                $player['gender'],
+                $tournament['category_name'],
+                $tournament['category_gender']
+            )
+        ) {
+            $eligible[] = $player;
+        }
+    }
+    return $eligible;
+}
+
 function assignPlayerToTournament($conn, $playerId, $tournamentId)
 {
-    $stmt = $conn->prepare('SELECT category_id FROM tournaments WHERE id = ?');
+    $hasIdentityType = tableColumnExists($conn, 'players', 'identity_type');
+    $hasPassportExpiry = tableColumnExists($conn, 'players', 'passport_expiry_date');
+    $identitySelect = $hasIdentityType ? 'p.identity_type' : "'NIC' AS identity_type";
+    $expirySelect = $hasPassportExpiry ? 'passport_expiry_date' : 'NULL AS passport_expiry_date';
+    $stmt = $conn->prepare(
+        "SELECT {$identitySelect}, {$expirySelect}, p.gender, ac.name AS calculated_category_name
+         FROM players p
+         LEFT JOIN age_categories ac ON ac.id = p.calculated_category_id
+         WHERE p.id = ? LIMIT 1"
+    );
+    $stmt->bind_param('i', $playerId);
+    $stmt->execute();
+    $player = $stmt->get_result()->fetch_assoc();
+    if (!$player) {
+        throw new Exception('Player not found.');
+    }
+
+    $dateSelect = tableColumnExists($conn, 'tournaments', 'end_on') ? 't.category_id, t.held_on, t.end_on' : 't.category_id, t.held_on, NULL AS end_on';
+    $stmt = $conn->prepare(
+        "SELECT {$dateSelect}, ac.name AS category_name, ac.gender AS category_gender
+         FROM tournaments t
+         LEFT JOIN age_categories ac ON ac.id = t.category_id
+         WHERE t.id = ?"
+    );
     $stmt->bind_param('i', $tournamentId);
     $stmt->execute();
     $tournament = $stmt->get_result()->fetch_assoc();
@@ -527,7 +1129,31 @@ function assignPlayerToTournament($conn, $playerId, $tournamentId)
         throw new Exception('Tournament not found.');
     }
 
+    $passportStatus = getPassportExpiryStatus($player['identity_type'] ?? 'NIC', $player['passport_expiry_date'] ?? null);
+    if ($passportStatus === 'expired') {
+        throw new Exception(getPassportExpiryLabel($passportStatus, $player['passport_expiry_date']));
+    }
+    $tournamentCheckDate = $tournament['end_on'] ?: $tournament['held_on'];
+    if (($player['identity_type'] ?? '') === 'Passport' && !empty($player['passport_expiry_date']) && !empty($tournamentCheckDate)) {
+        $expiry = DateTime::createFromFormat('Y-m-d', $player['passport_expiry_date']);
+        $tournamentDate = DateTime::createFromFormat('Y-m-d', $tournamentCheckDate);
+        if ($expiry && $tournamentDate && $expiry < $tournamentDate) {
+            throw new Exception('Passport expires before the selected tournament ends.');
+        }
+    }
+
     $categoryId = (int)$tournament['category_id'];
+    if (
+        !isPlayerEligibleForTournamentCategory(
+            $player['calculated_category_name'] ?? '',
+            $player['gender'] ?? '',
+            $tournament['category_name'] ?? '',
+            $tournament['category_gender'] ?? ''
+        )
+    ) {
+        throw new Exception('This player is not eligible for the selected tournament category.');
+    }
+
     $stmt = $conn->prepare('SELECT id FROM player_tournaments WHERE player_id = ? AND tournament_id = ?');
     $stmt->bind_param('ii', $playerId, $tournamentId);
     $stmt->execute();
@@ -595,10 +1221,10 @@ function saveScore($conn, $playerId, $tournamentId, $finishPosition)
     return $ok;
 }
 
-function getScoresList($conn, $playerId = null, $searchTerm = '')
+function getScoresList($conn, $playerId = null, $filters = [])
 {
     $sql = 'SELECT tr.id, p.full_name, t.name AS tournament_name, ac.name AS category,
-                   t.held_on, tr.finish_position, tr.points_awarded, tr.is_penalty
+                   t.held_on, t.tier, tr.finish_position, tr.points_awarded, tr.is_penalty
             FROM tournament_results tr
             JOIN players p ON tr.player_id = p.id
             JOIN tournaments t ON tr.tournament_id = t.id
@@ -610,11 +1236,60 @@ function getScoresList($conn, $playerId = null, $searchTerm = '')
         $sql .= ' AND p.id = ?';
         $params[] = (int)$playerId;
         $types .= 'i';
-    } elseif ($searchTerm !== '') {
+    }
+
+    $searchTerm = trim($filters['search'] ?? '');
+    if (!$playerId && $searchTerm !== '') {
         $sql .= ' AND p.full_name LIKE ?';
         $params[] = '%' . $searchTerm . '%';
         $types .= 's';
     }
+    if (!$playerId && !empty($filters['tournament_id'])) {
+        $sql .= ' AND t.id = ?';
+        $params[] = (int)$filters['tournament_id'];
+        $types .= 'i';
+    }
+    if (!$playerId && !empty($filters['category_id'])) {
+        $sql .= ' AND t.category_id = ?';
+        $params[] = (int)$filters['category_id'];
+        $types .= 'i';
+    }
+    if (!$playerId && in_array(($filters['tier'] ?? ''), ['A', 'B'], true)) {
+        $sql .= ' AND t.tier = ?';
+        $params[] = $filters['tier'];
+        $types .= 's';
+    }
+    if (!$playerId && !empty($filters['date_from'])) {
+        $sql .= ' AND t.held_on >= ?';
+        $params[] = $filters['date_from'];
+        $types .= 's';
+    }
+    if (!$playerId && !empty($filters['date_to'])) {
+        $sql .= ' AND t.held_on <= ?';
+        $params[] = $filters['date_to'];
+        $types .= 's';
+    }
+    if (!$playerId && isset($filters['finish_position']) && $filters['finish_position'] !== '') {
+        $sql .= ' AND tr.finish_position = ?';
+        $params[] = (int)$filters['finish_position'];
+        $types .= 'i';
+    }
+    if (!$playerId && isset($filters['penalty']) && $filters['penalty'] !== '') {
+        $sql .= ' AND tr.is_penalty = ?';
+        $params[] = (int)$filters['penalty'];
+        $types .= 'i';
+    }
+    if (!$playerId && isset($filters['points_min']) && $filters['points_min'] !== '') {
+        $sql .= ' AND tr.points_awarded >= ?';
+        $params[] = (float)$filters['points_min'];
+        $types .= 'd';
+    }
+    if (!$playerId && isset($filters['points_max']) && $filters['points_max'] !== '') {
+        $sql .= ' AND tr.points_awarded <= ?';
+        $params[] = (float)$filters['points_max'];
+        $types .= 'd';
+    }
+
     $sql .= ' ORDER BY t.held_on DESC, tr.id DESC';
     $stmt = $conn->prepare($sql);
     if ($types !== '') {

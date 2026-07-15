@@ -7,8 +7,20 @@ ALTER TABLE users
     ADD COLUMN is_first_login TINYINT(1) NOT NULL DEFAULT 1,
     ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1;
 
+CREATE TABLE IF NOT EXISTS user_sessions (
+    session_id VARCHAR(128) PRIMARY KEY,
+    user_id INT UNSIGNED NOT NULL,
+    last_activity INT UNSIGNED NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_sessions_user_activity (user_id, last_activity),
+    CONSTRAINT fk_user_sessions_user
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 ALTER TABLE players
+    ADD COLUMN identity_type ENUM('NIC', 'Passport') NOT NULL DEFAULT 'NIC',
     ADD COLUMN nic VARCHAR(20) NULL,
+    ADD COLUMN passport_expiry_date DATE NULL,
     ADD COLUMN dob DATE NULL,
     ADD COLUMN date_of_birth DATE NULL,
     ADD COLUMN gender ENUM('Male','Female') NULL,
@@ -27,8 +39,10 @@ CREATE TABLE IF NOT EXISTS age_categories (
 INSERT IGNORE INTO age_categories (name, gender) VALUES
 ('Boys U9', 'Male'), ('Girls U9', 'Female'),
 ('Boys U11', 'Male'), ('Girls U11', 'Female'),
+('Boys U 11 Novice', 'Male'), ('Girls U 11 Novice', 'Female'),
 ('Boys U13', 'Male'), ('Girls U13', 'Female'),
 ('Boys U15', 'Male'), ('Girls U15', 'Female'),
+('Boys U 15 Novice', 'Male'), ('Girls U 15 Novice', 'Female'),
 ('Boys U17', 'Male'), ('Girls U17', 'Female'),
 ('Boys U19', 'Male'), ('Girls U19', 'Female'),
 ('Men''s Open', 'Male'), ('Women''s Open', 'Female'),
@@ -52,6 +66,7 @@ ALTER TABLE tournaments
     ADD COLUMN tier ENUM('A','B') NOT NULL DEFAULT 'B',
     ADD COLUMN draw_size INT UNSIGNED NOT NULL DEFAULT 0,
     ADD COLUMN held_on DATE NULL,
+    ADD COLUMN end_on DATE NULL,
     ADD COLUMN category_id INT UNSIGNED NULL,
     ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0;
 

@@ -62,9 +62,15 @@ include "../public/header.php";
                         </div>
                         <div class="row">
                             <div class="col-md-6 mb-3">
-                                <label class="form-label fw-bold">Date</label>
+                                <label class="form-label fw-bold">Starting Date</label>
                                 <input type="date" name="held_on" class="form-control" value="<?php echo e($tournament['held_on']); ?>" required>
                             </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Ending Date</label>
+                                <input type="date" name="end_on" class="form-control" value="<?php echo e($tournament['end_on'] ?? ''); ?>" required>
+                            </div>
+                        </div>
+                        <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label class="form-label fw-bold">Age Category</label>
                                 <select name="category_id" class="form-select" required>

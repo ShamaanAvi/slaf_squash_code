@@ -6,9 +6,9 @@ require_once "../config/functions.php";
 adminOnly();
 
 $msg = "";
-$selectedPlayer = isset($_POST['player']) ? (int)$_POST['player'] : (int)($_GET['player'] ?? 0);
-$players = getPlayers($conn);
-$pendingTournaments = $selectedPlayer ? getAssignedTournamentsWithoutResult($conn, $selectedPlayer) : [];
+$selectedTournament = isset($_POST['tournament']) ? (int)$_POST['tournament'] : (int)($_GET['tournament'] ?? 0);
+$tournaments = getTournamentList($conn);
+$assignedPlayers = $selectedTournament ? getAssignedPlayersWithoutResult($conn, $selectedTournament) : [];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['save'])) {
     validateCsrfToken();
@@ -41,28 +41,33 @@ include "../public/header.php";
                     <?php endif; ?>
 
                     <form method="get" class="mb-4">
-                        <label class="form-label fw-bold text-secondary">Select Player</label>
-                        <select name="player" class="form-select" onchange="this.form.submit()" required>
-                            <option value="">Select Player</option>
-                            <?php foreach ($players as $player): ?>
-                                <option value="<?php echo (int)$player['id']; ?>" <?php echo $selectedPlayer === (int)$player['id'] ? 'selected' : ''; ?>><?php echo e($player['full_name']); ?></option>
+                        <label class="form-label fw-bold text-secondary">Tournament</label>
+                        <select name="tournament" class="form-select" onchange="this.form.submit()" required>
+                            <option value="">Select Tournament</option>
+                            <?php foreach ($tournaments as $tournament): ?>
+                                <option value="<?php echo (int)$tournament['id']; ?>" <?php echo $selectedTournament === (int)$tournament['id'] ? 'selected' : ''; ?>>
+                                    <?php echo e($tournament['display_name']); ?> - <?php echo e($tournament['category_name'] ?? ''); ?>
+                                </option>
                             <?php endforeach; ?>
                         </select>
                     </form>
 
                     <form method="post">
                         <?php echo csrfField(); ?>
-                        <input type="hidden" name="player" value="<?php echo (int)$selectedPlayer; ?>">
+                        <input type="hidden" name="tournament" value="<?php echo (int)$selectedTournament; ?>">
                         <div class="mb-3">
-                            <label class="form-label fw-bold text-secondary">Tournament</label>
-                            <select name="tournament" class="form-select" required <?php echo $selectedPlayer ? '' : 'disabled'; ?>>
-                                <option value="">Select Tournament</option>
-                                <?php foreach ($pendingTournaments as $tournament): ?>
-                                    <option value="<?php echo (int)$tournament['id']; ?>" <?php echo (int)$tournament['draw_size'] < 4 ? 'disabled' : ''; ?>>
-                                        <?php echo e($tournament['display_name']); ?><?php echo (int)$tournament['draw_size'] < 4 ? ' (draw too small)' : ''; ?>
+                            <label class="form-label fw-bold text-secondary">Player</label>
+                            <select name="player" class="form-select" required <?php echo $selectedTournament ? '' : 'disabled'; ?>>
+                                <option value="">Select Player</option>
+                                <?php foreach ($assignedPlayers as $player): ?>
+                                    <option value="<?php echo (int)$player['id']; ?>">
+                                        <?php echo e($player['full_name']); ?><?php echo !empty($player['calculated_category_name']) ? ' - ' . e($player['calculated_category_name']) : ''; ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
+                            <?php if ($selectedTournament && !$assignedPlayers): ?>
+                                <div class="form-text text-danger">No assigned players without results for this tournament.</div>
+                            <?php endif; ?>
                         </div>
                         <div class="mb-4">
                             <label class="form-label fw-bold text-secondary">Finishing Position</label>
@@ -74,7 +79,7 @@ include "../public/header.php";
                                 <option value="withdrawal">Withdrawal / No-show</option>
                             </select>
                         </div>
-                        <button type="submit" name="save" class="btn btn-primary btn-lg w-100 shadow-sm" <?php echo $selectedPlayer ? '' : 'disabled'; ?>>Save Result</button>
+                        <button type="submit" name="save" class="btn btn-primary btn-lg w-100 shadow-sm" <?php echo ($selectedTournament && $assignedPlayers) ? '' : 'disabled'; ?>>Save Result</button>
                     </form>
                 </div>
             </div>

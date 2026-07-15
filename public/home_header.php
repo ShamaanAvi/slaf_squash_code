@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sri Lanka Air Force Squash | Home</title>
+    <title>Sri Lanka Squash Scoring System | Home</title>
 
     <meta name="view-transition" content="same-origin" />
 
@@ -34,6 +34,72 @@
         /* Keep indicator name synced so transitions work when leaving home */
         .nav-link.active::after {
             view-transition-name: active-nav-indicator;
+        }
+
+        img, svg, canvas, video {
+            max-width: 100%;
+        }
+
+        .card,
+        .dropdown-menu {
+            max-width: 100%;
+        }
+
+        .table-responsive {
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table {
+            min-width: max-content;
+        }
+
+        .btn,
+        .form-control,
+        .form-select,
+        .input-group-text {
+            min-width: 0;
+        }
+
+        .input-group > .form-control,
+        .input-group > .form-select {
+            min-width: 0;
+        }
+
+        .badge {
+            white-space: normal;
+        }
+
+        @media (max-width: 575.98px) {
+            .home-container {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 1.5rem !important;
+                padding-bottom: 1.5rem !important;
+            }
+
+            .card-header,
+            .card-body,
+            .card-footer {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+
+            .card-header h4,
+            .card-header h5 {
+                font-size: 1.05rem;
+                line-height: 1.25;
+            }
+
+            .btn-lg {
+                --bs-btn-padding-y: 0.55rem;
+                --bs-btn-padding-x: 0.85rem;
+                --bs-btn-font-size: 1rem;
+            }
+
+            .d-flex.gap-2,
+            .d-flex.gap-3 {
+                flex-wrap: wrap;
+            }
         }
     </style>
 </head>

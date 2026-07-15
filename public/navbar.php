@@ -19,7 +19,7 @@ $username = $_SESSION['username'] ?? 'Guest';
     html { overflow-y: scroll; } 
 
     .navbar {
-        height: 64px;
+        min-height: 64px;
         z-index: 1050;
         /* Ensure the navbar content doesn't shift */
         padding-right: calc(var(--bs-gutter-x, 1.5rem) * .5); 
@@ -77,17 +77,103 @@ $username = $_SESSION['username'] ?? 'Guest';
 
     /* 4. Layout Fix: Ensures ms-auto behaves the same even if me-auto is empty */
     #mainNavbar {
-        display: flex !important;
         flex-basis: auto;
         flex-grow: 1;
         align-items: center;
+    }
+
+    @media (min-width: 992px) {
+        #mainNavbar {
+            display: flex !important;
+        }
+    }
+
+    @media (max-width: 991.98px) {
+        .navbar {
+            height: auto;
+            padding: 10px 12px;
+        }
+
+        .navbar .container-fluid {
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .navbar-brand {
+            min-width: 0 !important;
+            max-width: calc(100vw - 92px);
+            white-space: normal;
+            line-height: 1.2;
+            font-size: 0.98rem;
+        }
+
+        #mainNavbar {
+            width: auto;
+        }
+
+        #mainNavbar.show,
+        #mainNavbar.collapsing {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            z-index: 1045;
+            width: 100%;
+            max-height: calc(100vh - 64px);
+            overflow-y: auto;
+            padding: 12px;
+            background: rgba(33, 37, 41, 0.98);
+            border-top: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 18px 36px rgba(15, 23, 42, 0.35);
+        }
+
+        #mainNavbar.collapsing {
+            transition: none;
+        }
+
+        .navbar-nav {
+            padding-top: 8px;
+            width: 100%;
+        }
+
+        .navbar .nav-link {
+            padding: 12px 10px !important;
+            border-radius: 8px;
+        }
+
+        .navbar .nav-link:hover,
+        .navbar .nav-link.active {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .navbar .nav-link::after {
+            display: none;
+        }
+
+        .navbar-nav.ms-auto {
+            margin-left: 0 !important;
+        }
+
+        .user-pill-btn {
+            width: 100%;
+            min-width: 0;
+            justify-content: flex-start;
+            border-radius: 8px;
+        }
+
+        .navbar .dropdown-menu {
+            position: static;
+            width: 100%;
+            margin-top: 8px !important;
+            transform: none;
+        }
     }
 </style>
 
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
     <div class="container-fluid">
         <a class="navbar-brand fw-bold" href="<?php echo e(appUrl('home.php')); ?>" style="min-width: 150px;">
-            <i class="bi bi-trophy-fill me-2"></i>SLAF Squash
+            <i class="bi bi-trophy-fill me-2"></i>Sri Lanka Squash Scoring System
         </a>
 
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar">
@@ -107,6 +193,7 @@ $username = $_SESSION['username'] ?? 'Guest';
                             <li class="nav-item"><a class="nav-link <?php echo isActive('scores/add.php', $current_page); ?>" href="<?php echo e(appUrl('scores/add.php')); ?>">Entry</a></li>
                             <li class="nav-item"><a class="nav-link <?php echo isActive('scores/list.php', $current_page); ?>" href="<?php echo e(appUrl('scores/list.php')); ?>">Scores</a></li>
                             <li class="nav-item"><a class="nav-link <?php echo isActive('admin/rankings.php', $current_page); ?>" href="<?php echo e(appUrl('admin/rankings.php')); ?>">Rankings</a></li>
+                            <li class="nav-item"><a class="nav-link <?php echo isActive('admin/reports.php', $current_page); ?>" href="<?php echo e(appUrl('admin/reports.php')); ?>">Reports</a></li>
                             <li class="nav-item"><a class="nav-link <?php echo isActive('admin/settings.php', $current_page); ?>" href="<?php echo e(appUrl('admin/settings.php')); ?>">Settings</a></li>
                         <?php else: ?>
                             <li class="nav-item"><a class="nav-link <?php echo isActive('scores/list.php', $current_page); ?>" href="<?php echo e(appUrl('scores/list.php')); ?>">My Scores</a></li>

@@ -1,8 +1,12 @@
 <?php
+require_once __DIR__ . "/db.php";
 require_once __DIR__ . "/functions.php";
 
 safeSessionStart();
-checkSessionTimeout(1800);
+enforceAuthenticatedSession($conn, 600, 3);
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 
 /**
  * Basic access check: ensures user is logged in.

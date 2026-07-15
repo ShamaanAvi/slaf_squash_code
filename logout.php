@@ -5,7 +5,17 @@
  */
 
 // 1. Initialize the session
-session_start();
+require_once "config/db.php";
+require_once "config/functions.php";
+safeSessionStart();
+
+if (isset($_SESSION['user_id'])) {
+    ensureUserSessionsTable($conn);
+    $sessionId = session_id();
+    $stmt = $conn->prepare('DELETE FROM user_sessions WHERE session_id = ?');
+    $stmt->bind_param('s', $sessionId);
+    $stmt->execute();
+}
 
 // 2. Unset all session variables
 $_SESSION = array();

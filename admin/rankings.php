@@ -45,14 +45,14 @@ include "../public/header.php";
                     <div class="fw-bold"><?php echo e($lastRun ?: 'Never'); ?></div>
                 </div>
                 <div class="col-md-4">
-                    <form method="post">
+                    <form method="post" id="rankingTransitionModeForm">
                         <?php echo csrfField(); ?>
                         <input type="hidden" name="transition_mode" value="1">
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" name="transition_enabled" id="transition_enabled" <?php echo $transitionMode === '1' ? 'checked' : ''; ?>>
                             <label class="form-check-label fw-bold" for="transition_enabled">Transition mode</label>
                         </div>
-                        <button class="btn btn-outline-primary btn-sm mt-2">Save Mode</button>
+                        <div class="form-text">Changes save automatically when toggled.</div>
                     </form>
                 </div>
                 <div class="col-md-4 text-md-end">
@@ -94,5 +94,17 @@ include "../public/header.php";
         </div>
     </div>
 </div>
+
+<script>
+const rankingTransitionToggle = document.getElementById('transition_enabled');
+const rankingTransitionForm = document.getElementById('rankingTransitionModeForm');
+
+if (rankingTransitionToggle && rankingTransitionForm) {
+    rankingTransitionToggle.addEventListener('change', () => {
+        rankingTransitionToggle.disabled = true;
+        rankingTransitionForm.submit();
+    });
+}
+</script>
 
 <?php include "../public/footer.php"; ?>

@@ -26,11 +26,23 @@ CREATE TABLE users (
     INDEX idx_users_player (player_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE user_sessions (
+    session_id VARCHAR(128) PRIMARY KEY,
+    user_id INT UNSIGNED NOT NULL,
+    last_activity INT UNSIGNED NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_sessions_user_activity (user_id, last_activity),
+    CONSTRAINT fk_user_sessions_user
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE players (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NOT NULL UNIQUE,
     full_name VARCHAR(150) NOT NULL,
+    identity_type ENUM('NIC', 'Passport') NOT NULL DEFAULT 'NIC',
     nic VARCHAR(20) NULL UNIQUE,
+    passport_expiry_date DATE NULL,
     dob DATE NULL,
     date_of_birth DATE NULL,
     gender ENUM('Male', 'Female') NULL,
@@ -70,6 +82,7 @@ CREATE TABLE tournaments (
     tier ENUM('A', 'B') NOT NULL DEFAULT 'B',
     draw_size INT UNSIGNED NOT NULL DEFAULT 0,
     held_on DATE NOT NULL,
+    end_on DATE NOT NULL,
     category_id INT UNSIGNED NOT NULL,
     is_archived TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -166,8 +179,10 @@ CREATE TABLE scores (
 INSERT INTO age_categories (name, gender) VALUES
 ('Boys U9', 'Male'), ('Girls U9', 'Female'),
 ('Boys U11', 'Male'), ('Girls U11', 'Female'),
+('Boys U 11 Novice', 'Male'), ('Girls U 11 Novice', 'Female'),
 ('Boys U13', 'Male'), ('Girls U13', 'Female'),
 ('Boys U15', 'Male'), ('Girls U15', 'Female'),
+('Boys U 15 Novice', 'Male'), ('Girls U 15 Novice', 'Female'),
 ('Boys U17', 'Male'), ('Girls U17', 'Female'),
 ('Boys U19', 'Male'), ('Girls U19', 'Female'),
 ('Men''s Open', 'Male'), ('Women''s Open', 'Female'),

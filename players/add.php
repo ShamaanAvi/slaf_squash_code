@@ -13,13 +13,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     validateCsrfToken();
     $data = [
         'name'   => trim($_POST['name']),
+        'identity_type' => $_POST['identity_type'] ?? '',
         'nic'    => trim($_POST['nic']),
+        'passport_expiry_date' => trim($_POST['passport_expiry_date'] ?? ''),
         'dob'    => $_POST['dob'],
         'gender' => $_POST['gender'] ?? '',
         'address' => trim($_POST['address'] ?? ''),
         'phone' => trim($_POST['phone'] ?? ''),
-        'email' => trim($_POST['email'] ?? ''),
-        'other_category_id' => $_POST['other_category_id'] ?? 0
+        'email' => trim($_POST['email'] ?? '')
     ];
 
     if (strtotime($data['dob']) > time()) {
@@ -41,8 +42,82 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 }
 
 include "../public/header.php"; 
-$categories = getAgeCategories($conn);
+$playerSearch = trim($_GET['player_search'] ?? '');
+$playerRows = $playerSearch !== '' ? getPlayerList($conn, $playerSearch) : [];
 ?>
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <form method="get" class="card shadow-sm border-0 p-3">
+                <div class="input-group">
+                    <span class="input-group-text bg-white"><i class="bi bi-search" aria-hidden="true"></i></span>
+                    <input type="text" name="player_search" class="form-control" aria-label="Find existing player" placeholder="Find existing player by name, document, phone, or email" value="<?php echo e($playerSearch); ?>">
+                    <button class="btn btn-primary" type="submit">Find</button>
+                    <?php if ($playerSearch !== ''): ?>
+                        <a href="add.php" class="btn btn-outline-secondary" aria-label="Clear player search"><i class="bi bi-x-lg"></i></a>
+                    <?php endif; ?>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="playerSearchModal" tabindex="-1" aria-labelledby="playerSearchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="playerSearchModalLabel">Player matches</h5>
+                <a href="add.php" class="btn-close btn-close-white" aria-label="Close"></a>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">Results for <strong><?php echo e($playerSearch); ?></strong></p>
+                <?php if ($playerRows): ?>
+                    <div class="list-group">
+                        <?php foreach ($playerRows as $player): ?>
+                            <a href="edit.php?id=<?php echo (int)$player['id']; ?>" class="list-group-item list-group-item-action py-3">
+                                <div class="d-flex flex-wrap justify-content-between gap-2">
+                                    <div>
+                                        <div class="fw-bold"><?php echo e($player['full_name']); ?></div>
+                                        <div class="small text-muted">
+                                            <?php echo e($player['gender'] ?? ''); ?>
+                                            <?php if (!empty($player['date_of_birth']) || !empty($player['dob'])): ?>
+                                                <span class="mx-1">|</span><?php echo e($player['date_of_birth'] ?: $player['dob']); ?>
+                                            <?php endif; ?>
+                                            <?php if (!empty($player['calculated_category_name'])): ?>
+                                                <span class="mx-1">|</span><?php echo e($player['calculated_category_name']); ?>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                    <span class="badge bg-light text-dark border align-self-start"><?php echo e($player['passport_status_label']); ?></span>
+                                </div>
+                                <div class="row small text-secondary mt-2 g-2">
+                                    <div class="col-md-4">
+                                        <i class="bi bi-person-vcard me-1"></i>
+                                        <?php echo e(($player['identity_type'] ?? '') . (!empty($player['nic']) ? ': ' . $player['nic'] : '')); ?>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <i class="bi bi-telephone me-1"></i>
+                                        <?php echo e($player['phone'] ?? ''); ?>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <i class="bi bi-envelope me-1"></i>
+                                        <?php echo e($player['email'] ?? ''); ?>
+                                    </div>
+                                </div>
+                            </a>
+                        <?php endforeach; ?>
+                    </div>
+                <?php else: ?>
+                    <div class="text-center py-5 text-muted">
+                        <i class="bi bi-search display-6 d-block mb-2"></i>
+                        No players found.
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="container mt-4">
     <div class="row justify-content-center">
@@ -80,8 +155,29 @@ $categories = getAgeCategories($conn);
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label fw-bold text-secondary">NIC / Passport Number</label>
-                            <input type="text" class="form-control" name="nic" required>
+                            <label class="form-label fw-bold text-secondary d-block">Registration Document</label>
+                            <div class="btn-group w-100" role="group" aria-label="Registration document type">
+                                <input type="radio" class="btn-check" name="identity_type" id="identityNic" value="NIC" required>
+                                <label class="btn btn-outline-primary" for="identityNic">
+                                    <i class="bi bi-person-vcard me-1"></i>NIC
+                                </label>
+
+                                <input type="radio" class="btn-check" name="identity_type" id="identityPassport" value="Passport">
+                                <label class="btn btn-outline-primary" for="identityPassport">
+                                    <i class="bi bi-book me-1"></i>Passport
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold text-secondary" id="identityNumberLabel">Document Number</label>
+                            <input type="text" class="form-control" name="nic" id="identityNumber" placeholder="Choose NIC or Passport first">
+                        </div>
+
+                        <div class="mb-3 d-none" id="passportExpiryGroup">
+                            <label class="form-label fw-bold text-secondary">Passport Expiry Date</label>
+                            <input type="date" class="form-control" name="passport_expiry_date" id="passportExpiryDate">
+                            <div class="form-text">Used to warn admins before tournament allocation.</div>
                         </div>
 
                         <div class="row">
@@ -123,17 +219,6 @@ $categories = getAgeCategories($conn);
                             <label class="form-label fw-bold text-secondary">Email</label>
                             <input type="email" class="form-control" name="email">
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label fw-bold text-secondary">Optional Additional Category</label>
-                            <select class="form-select" name="other_category_id" id="otherCategory">
-                                <option value="">No additional category</option>
-                                <?php foreach ($categories as $category): ?>
-                                    <option value="<?php echo (int)$category['id']; ?>"><?php echo e($category['name']); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                            <div class="form-text">Only use this if the player must also be enrolled in a second eligible category.</div>
-                        </div>
-
                         <div class="d-grid mt-4">
                             <button type="submit" class="btn btn-primary btn-lg shadow-sm">
                                 <i class="bi bi-person-plus-fill me-2"></i>Save Player
@@ -150,8 +235,12 @@ $categories = getAgeCategories($conn);
 <script>
     const dobInput = document.querySelector('input[name="dob"]');
     const genderInput = document.querySelector('select[name="gender"]');
+    const identityTypeInputs = document.querySelectorAll('input[name="identity_type"]');
+    const identityNumberLabel = document.getElementById('identityNumberLabel');
+    const identityNumber = document.getElementById('identityNumber');
+    const passportExpiryGroup = document.getElementById('passportExpiryGroup');
+    const passportExpiryDate = document.getElementById('passportExpiryDate');
     const assignedCategory = document.getElementById('assignedCategory');
-    const otherCategory = document.getElementById('otherCategory');
     const rankingYear = <?php echo (int)date('Y'); ?>;
 
     function categoryForAge(dob, gender) {
@@ -196,17 +285,39 @@ $categories = getAgeCategories($conn);
         assignedCategory.classList.toggle('text-muted', category === '');
         assignedCategory.classList.toggle('fw-bold', category !== '');
 
-        Array.from(otherCategory.options).forEach((option) => {
-            option.disabled = category !== '' && option.text === category;
-            if (option.disabled && option.selected) {
-                otherCategory.value = '';
-            }
-        });
+    }
+
+    function updateIdentityLabel() {
+        const checked = document.querySelector('input[name="identity_type"]:checked');
+        if (!checked) {
+            identityNumberLabel.textContent = 'Document Number';
+            identityNumber.placeholder = 'Choose NIC or Passport first';
+            passportExpiryGroup.classList.add('d-none');
+            passportExpiryDate.value = '';
+            return;
+        }
+        const selected = checked.value;
+        identityNumberLabel.textContent = selected + ' Number';
+        identityNumber.placeholder = 'Enter ' + selected.toLowerCase() + ' number, if available';
+        const isPassport = selected === 'Passport';
+        passportExpiryGroup.classList.toggle('d-none', !isPassport);
+        if (!isPassport) {
+            passportExpiryDate.value = '';
+        }
     }
 
     dobInput.addEventListener('change', updateAssignedCategory);
     genderInput.addEventListener('change', updateAssignedCategory);
+    identityTypeInputs.forEach((input) => input.addEventListener('change', updateIdentityLabel));
     updateAssignedCategory();
+    updateIdentityLabel();
+
+    <?php if ($playerSearch !== ''): ?>
+    document.addEventListener('DOMContentLoaded', function() {
+        const playerSearchModal = new bootstrap.Modal(document.getElementById('playerSearchModal'));
+        playerSearchModal.show();
+    });
+    <?php endif; ?>
 </script>
 
 <?php include "../public/footer.php"; ?>

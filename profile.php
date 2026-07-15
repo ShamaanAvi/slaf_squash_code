@@ -5,20 +5,26 @@ require_once "config/functions.php";
 
 checkAccess();
 
+$userId = (int)($_SESSION['user_id'] ?? 0);
+$isPlayerProfile = ($_SESSION['role'] ?? '') === 'player';
 $playerId = (int)($_SESSION['player_id'] ?? 0);
-if ($_SESSION['role'] !== 'player' || $playerId <= 0) {
+if ($userId <= 0 || ($isPlayerProfile && $playerId <= 0)) {
     header("Location: " . redirectPath('home.php'));
     exit;
 }
 
 $message = "";
 $type = "success";
-$profile = getPlayerProfile($conn, $playerId);
+$profile = $isPlayerProfile ? getPlayerProfile($conn, $playerId) : getUserAccount($conn, $userId);
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     validateCsrfToken();
     try {
-        updatePlayerProfile($conn, $playerId, $_POST, (int)$_SESSION['user_id'], false);
+        if ($isPlayerProfile) {
+            updatePlayerProfile($conn, $playerId, $_POST, $userId, false);
+        } else {
+            updateUserPassword($conn, $userId, $_POST);
+        }
         header("Location: " . redirectPath('profile.php?success=1'));
         exit;
     } catch (Exception $e) {
@@ -27,7 +33,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
-$profile = getPlayerProfile($conn, $playerId);
+$profile = $isPlayerProfile ? getPlayerProfile($conn, $playerId) : getUserAccount($conn, $userId);
 include "public/home_header.php";
 ?>
 
@@ -47,6 +53,31 @@ include "public/home_header.php";
 
                 <form method="post">
                     <?php echo csrfField(); ?>
+                    <?php if (!$isPlayerProfile): ?>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Username</label>
+                        <input type="text" class="form-control bg-light" value="<?php echo e($profile['username'] ?? ''); ?>" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Role</label>
+                        <input type="text" class="form-control bg-light text-capitalize" value="<?php echo e($profile['role'] ?? ''); ?>" readonly>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">New Password</label>
+                            <input type="password" name="password" class="form-control" autocomplete="new-password" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Confirm Password</label>
+                            <input type="password" name="confirm_password" class="form-control" autocomplete="new-password" required>
+                        </div>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary btn-lg"><i class="bi bi-save me-2"></i>Save Profile</button>
+                        <a href="<?php echo e(appUrl('home.php')); ?>" class="btn btn-outline-secondary">Back to Dashboard</a>
+                    </div>
+                    <?php else: ?>
                     <div class="mb-3">
                         <label class="form-label fw-bold">Full Name</label>
                         <input type="text" name="name" class="form-control" value="<?php echo e($profile['full_name'] ?? ''); ?>" required>
@@ -94,6 +125,7 @@ include "public/home_header.php";
                         <button class="btn btn-primary btn-lg"><i class="bi bi-save me-2"></i>Save Profile</button>
                         <a href="<?php echo e(appUrl('home.php')); ?>" class="btn btn-outline-secondary">Back to Dashboard</a>
                     </div>
+                    <?php endif; ?>
                 </form>
             </div>
         </div>

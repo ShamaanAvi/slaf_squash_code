@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sri Lanka Air Force Squash</title>
+    <title>Sri Lanka Squash Scoring System</title>
     
     <meta name="view-transition" content="same-origin" />
 
@@ -58,6 +58,81 @@
         /* Input stability */
         .form-control:focus {
             box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15) !important;
+        }
+
+        img, svg, canvas, video {
+            max-width: 100%;
+        }
+
+        .card,
+        .modal-content,
+        .dropdown-menu {
+            max-width: 100%;
+        }
+
+        .table-responsive {
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table {
+            min-width: max-content;
+        }
+
+        .btn,
+        .form-control,
+        .form-select,
+        .input-group-text {
+            min-width: 0;
+        }
+
+        .input-group > .form-control,
+        .input-group > .form-select {
+            min-width: 0;
+        }
+
+        .badge {
+            white-space: normal;
+        }
+
+        @media (max-width: 575.98px) {
+            .main-content-wrapper > .container,
+            .main-content-wrapper > .container-fluid {
+                padding-left: 12px;
+                padding-right: 12px;
+            }
+
+            .container.mt-4,
+            .container-fluid.mt-4 {
+                margin-top: 1rem !important;
+            }
+
+            .card-header,
+            .card-body,
+            .card-footer {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+
+            .card-header h4,
+            .card-header h5 {
+                font-size: 1.05rem;
+                line-height: 1.25;
+            }
+
+            .btn-lg {
+                --bs-btn-padding-y: 0.55rem;
+                --bs-btn-padding-x: 0.85rem;
+                --bs-btn-font-size: 1rem;
+            }
+
+            .d-flex.gap-2,
+            .d-flex.gap-3 {
+                flex-wrap: wrap;
+            }
+
+            .modal-dialog {
+                margin: 0.75rem;
+            }
         }
     </style>
 </head>
