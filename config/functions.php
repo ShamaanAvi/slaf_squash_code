@@ -461,8 +461,22 @@ function refreshAllPlayerCalculatedCategories($conn, $year = null)
     return $updated;
 }
 
+function ensurePlayerCalculatedCategoriesCurrent($conn)
+{
+    $currentYear = (string)date('Y');
+    if (getSystemSetting($conn, 'player_categories_refreshed_year', '') === $currentYear) {
+        return false;
+    }
+
+    refreshAllPlayerCalculatedCategories($conn, (int)$currentYear);
+    setSystemSetting($conn, 'player_categories_refreshed_year', $currentYear);
+    return true;
+}
+
 function getPlayers($conn)
 {
+    ensurePlayerCalculatedCategoriesCurrent($conn);
+
     $hasIdentityType = tableColumnExists($conn, 'players', 'identity_type');
     $hasPassportExpiry = tableColumnExists($conn, 'players', 'passport_expiry_date');
     $identitySelect = $hasIdentityType ? 'identity_type' : "'NIC' AS identity_type";
@@ -481,6 +495,8 @@ function getPlayers($conn)
 
 function getPlayerList($conn, $search = '')
 {
+    ensurePlayerCalculatedCategoriesCurrent($conn);
+
     $sql = 'SELECT p.*, u.username, ac.name AS calculated_category_name
             FROM players p
             JOIN users u ON u.id = p.user_id
@@ -512,6 +528,8 @@ function getPlayerList($conn, $search = '')
 
 function getPlayerAdminById($conn, $playerId)
 {
+    refreshPlayerCalculatedCategory($conn, $playerId);
+
     $stmt = $conn->prepare(
         'SELECT p.*, u.username, u.is_active, ac.name AS calculated_category_name
          FROM players p
@@ -695,6 +713,8 @@ function registerPlayer($conn, $data)
 
 function getPlayerProfile($conn, $playerId)
 {
+    refreshPlayerCalculatedCategory($conn, $playerId);
+
     $stmt = $conn->prepare(
         'SELECT p.*, u.username, u.is_first_login
          FROM players p JOIN users u ON p.user_id = u.id
@@ -958,6 +978,8 @@ function getAssignedTournamentsWithoutResult($conn, $playerId)
 
 function getAssignedPlayersWithoutResult($conn, $tournamentId)
 {
+    ensurePlayerCalculatedCategoriesCurrent($conn);
+
     $stmt = $conn->prepare(
         'SELECT p.id, p.full_name, ac.name AS calculated_category_name
          FROM player_tournaments pt
@@ -1046,6 +1068,8 @@ function getTournamentDetails($conn, $id)
 
 function getTournamentAssignedPlayers($conn, $tournamentId)
 {
+    ensurePlayerCalculatedCategoriesCurrent($conn);
+
     $stmt = $conn->prepare(
         'SELECT pt.assigned_at, p.id AS player_id, p.full_name, p.identity_type, p.nic, p.passport_expiry_date,
                 COALESCE(p.date_of_birth, p.dob) AS dob, p.gender, p.phone, p.email,
@@ -1071,6 +1095,8 @@ function getTournamentAssignedPlayers($conn, $tournamentId)
 
 function getEligiblePlayersForTournament($conn, $tournamentId)
 {
+    ensurePlayerCalculatedCategoriesCurrent($conn);
+
     $tournament = getTournamentDetails($conn, $tournamentId);
     if (!$tournament) {
         return [];
@@ -1098,6 +1124,8 @@ function getEligiblePlayersForTournament($conn, $tournamentId)
 
 function assignPlayerToTournament($conn, $playerId, $tournamentId)
 {
+    refreshPlayerCalculatedCategory($conn, $playerId);
+
     $hasIdentityType = tableColumnExists($conn, 'players', 'identity_type');
     $hasPassportExpiry = tableColumnExists($conn, 'players', 'passport_expiry_date');
     $identitySelect = $hasIdentityType ? 'p.identity_type' : "'NIC' AS identity_type";

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # Sri Lanka Squash Scoring System
+=======
+# SLAF Squash
+>>>>>>> 3e95d93299aa7445463bd1d55dfb03fae15b957b
 
 A PHP and MySQL web application for managing squash players, tournaments, results, and rolling rankings.
 
@@ -18,7 +22,11 @@ This project supports:
 - First-login flow for players with mandatory profile completion
 - Secure password handling with `password_hash()`
 - CSRF protection on state-changing forms
+<<<<<<< HEAD
 - Session timeout handling with a 10-minute idle limit and a maximum of 3 active sessions per account
+=======
+- Session timeout handling
+>>>>>>> 3e95d93299aa7445463bd1d55dfb03fae15b957b
 - Public rankings page with category filtering
 - Tournament points logic for Tier A and Tier B events
 - Ranking calculation based on the best 4 results from a player's last 6 tournaments within a 12-month window
@@ -65,7 +73,10 @@ The current database layer uses MySQLi and prepared statements.
 The main tables used by the app are:
 
 - `users`
+<<<<<<< HEAD
 - `user_sessions`
+=======
+>>>>>>> 3e95d93299aa7445463bd1d55dfb03fae15b957b
 - `players`
 - `age_categories`
 - `player_categories`
@@ -133,14 +144,20 @@ The application supports the following categories:
 - Girls U9
 - Boys U11
 - Girls U11
+<<<<<<< HEAD
 - Boys U 11 Novice
 - Girls U 11 Novice
+=======
+>>>>>>> 3e95d93299aa7445463bd1d55dfb03fae15b957b
 - Boys U13
 - Girls U13
 - Boys U15
 - Girls U15
+<<<<<<< HEAD
 - Boys U 15 Novice
 - Girls U 15 Novice
+=======
+>>>>>>> 3e95d93299aa7445463bd1d55dfb03fae15b957b
 - Boys U17
 - Girls U17
 - Boys U19
@@ -160,7 +177,11 @@ The application supports the following categories:
 
 - Passwords are hashed with bcrypt
 - CSRF tokens are required on protected POST requests
+<<<<<<< HEAD
 - Sessions use secure configuration helpers, enforce a 10-minute idle timeout, and allow up to 3 active sessions per account
+=======
+- Sessions use secure configuration helpers
+>>>>>>> 3e95d93299aa7445463bd1d55dfb03fae15b957b
 - Admin actions are logged to the audit trail
 
 ## Development Notes
